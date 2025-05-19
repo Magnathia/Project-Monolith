@@ -1,0 +1,52 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# VSCode workspace settings
+.vscode/
+*.code-workspace
+
+# Vagrant local state
+**/.vagrant/
+**/Vagrantfile.local
+
+# Ansible facts cache
+**/.ansible/
+
+# Logs, reports, cache (ignore contents, but keep dirs)
+logs/
+reports/
+cache/
+!logs/.gitkeep
+!reports/.gitkeep
+!cache/.gitkeep
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Python virtual environments
+.venv/
+env/
+venv/
+
+# Editor swap/backup files
+*~
+*.swp
+*.swo
+*.bak
+
+# Test output
+*.log
+*.tmp
+
+# Docker artifacts
+**/docker-compose.override.yml
+**/docker-compose.local.yml
+
+# Ignore ISO and RPMs in cache
+cache/*.iso
+cache/*.rpm
+cache/*.repo
+cache/*.tar
