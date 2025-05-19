@@ -1,0 +1,251 @@
+- name: Rocky 9 PXE Server Setup
+  hosts: all
+  become: true
+  vars:
+    rocky_iso_url: "https://download.rockylinux.org/pub/rocky/9.5/isos/x86_64/Rocky-9-latest-x86_64-minimal.iso"
+    rocky_iso_filename: "Rocky-9.5-x86_64-minimal.iso"
+    rocky_iso_path: "/var/lib/tftpboot/Rocky-9.5-x86_64-minimal.iso"
+    tftp_root: "/var/lib/tftpboot"
+    http_root: "/var/www/html"
+    pxe_menu_title: "Rocky 9 PXE Boot Menu"
+    cache_dir: "{{ cache_dir | default('/vagrant/cache') }}"
+    cache_iso_path: "{{ cache_dir }}/{{ rocky_iso_filename }}"
+    pxelinux_candidates:
+      - /usr/share/syslinux/pxelinux.0
+      - /usr/share/syslinux-tftpboot/pxelinux.0
+      - /var/lib/tftpboot/pxelinux.0
+  tasks:
+    - name: Ensure TFTP root directory exists
+      file:
+        path: "{{ tftp_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Ensure cache directory exists
+      file:
+        path: "{{ cache_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Check if ISO is in cache
+      stat:
+        path: "{{ cache_iso_path }}"
+      register: iso_in_cache
+
+    - name: Copy ISO from cache to TFTP root if present
+      copy:
+        src: "{{ cache_iso_path }}"
+        dest: "{{ rocky_iso_path }}"
+        remote_src: yes
+        mode: '0644'
+      when: iso_in_cache.stat.exists
+
+    - name: Download Rocky Linux ISO to TFTP root if not in cache
+      get_url:
+        url: "{{ rocky_iso_url }}"
+        dest: "{{ rocky_iso_path }}"
+        mode: '0644'
+      when: not iso_in_cache.stat.exists
+      register: iso_downloaded
+
+    - name: Copy downloaded ISO to cache if just downloaded
+      copy:
+        src: "{{ rocky_iso_path }}"
+        dest: "{{ cache_iso_path }}"
+        remote_src: yes
+        mode: '0644'
+      when: iso_downloaded is defined and iso_downloaded.changed
+
+    - name: Install PXE server packages
+      dnf:
+        name:
+          - dnsmasq
+          - httpd
+          - syslinux-tftpboot
+          - wget
+        state: present
+
+    - name: Enable and start dnsmasq and httpd
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - dnsmasq
+        - httpd
+
+    - name: Create TFTP and HTTP directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ tftp_root }}/pxelinux.cfg"
+        - "{{ http_root }}/kickstarts"
+
+    - name: Mount ISO and extract vmlinuz/initrd.img
+      mount:
+        path: /mnt
+        src: "{{ rocky_iso_path }}"
+        fstype: iso9660
+        opts: loop,ro
+        state: mounted
+      register: iso_mount
+
+    - name: Copy vmlinuz and initrd.img to TFTP root
+      copy:
+        remote_src: yes
+        src: "/mnt/images/pxeboot/{{ item }}"
+        dest: "{{ tftp_root }}/{{ item }}"
+        mode: '0644'
+      loop:
+        - vmlinuz
+        - initrd.img
+      when: iso_mount is changed
+
+    - name: Unmount ISO
+      mount:
+        path: /mnt
+        state: unmounted
+      when: iso_mount is changed
+
+    - name: Ensure syslinux-tftpboot is installed (for pxelinux.0)
+      dnf:
+        name: syslinux-tftpboot
+        state: present
+
+    - name: Find pxelinux.0 on system
+      stat:
+        path: "{{ item }}"
+      loop: "{{ pxelinux_candidates }}"
+      register: pxelinux_stats
+
+    - name: Set pxelinux.0 source path
+      set_fact:
+        pxelinux_src: "{{ item.stat.path }}"
+      when: item.stat.exists
+      loop: "{{ pxelinux_stats.results }}"
+      register: pxelinux_src_fact
+
+    - name: Fail if pxelinux.0 not found
+      fail:
+        msg: "pxelinux.0 not found on system. Checked: {{ pxelinux_candidates }}"
+      when: pxelinux_src_fact.results | selectattr('ansible_facts.pxelinux_src', 'defined') | list | length == 0
+
+    - name: Copy PXELINUX bootloader
+      copy:
+        src: "{{ pxelinux_src }}"
+        dest: "{{ tftp_root }}/pxelinux.0"
+        remote_src: yes
+        mode: '0644'
+      when: pxelinux_src is defined
+
+    - name: Create PXE menu config
+      copy:
+        dest: "{{ tftp_root }}/pxelinux.cfg/default"
+        content: |
+          DEFAULT menu.c32
+          PROMPT 0
+          TIMEOUT 100
+          MENU TITLE {{ pxe_menu_title }}
+
+          LABEL Rocky9 CLI Only
+            MENU LABEL Install Rocky9 CLI Only
+            KERNEL vmlinuz
+            APPEND initrd=initrd.img inst.ks=http://192.168.56.20/kickstarts/cli.ks
+
+          LABEL Rocky9 Tomcat
+            MENU LABEL Install Rocky9 Tomcat
+            KERNEL vmlinuz
+            APPEND initrd=initrd.img inst.ks=http://192.168.56.20/kickstarts/tomcat.ks
+
+          LABEL Rocky9 GUI
+            MENU LABEL Install Rocky9 GUI
+            KERNEL vmlinuz
+            APPEND initrd=initrd.img inst.ks=http://192.168.56.20/kickstarts/gui.ks
+
+    - name: Create example kickstart files for each variation
+      copy:
+        dest: "{{ http_root }}/kickstarts/{{ item.name }}.ks"
+        content: |
+          #version=RHEL9
+          install
+          url --url="http://192.168.56.20/"
+          lang en_US.UTF-8
+          keyboard us
+          network --bootproto=dhcp
+          rootpw vagrant
+          firewall --enabled
+          authconfig --enableshadow --passalgo=sha512
+          selinux --enforcing
+          timezone America/New_York --isUtc
+          bootloader --location=mbr
+          clearpart --all --initlabel
+          autopart
+          %packages
+          @core
+          {% raw %}
+          {% if item.name == 'gui' %}
+          @server-with-gui
+          -@multimedia
+          -@office-suite
+          -@graphical-admin-tools
+          -@guest-agents
+          {% elif item.name == 'tomcat' %}
+          java-11-openjdk
+          tomcat
+          {% endif %}
+          {% endraw %}
+          python3
+          python3-pip
+          %end
+        mode: '0644'
+      loop:
+        - { name: "cli" }
+        - { name: "tomcat" }
+        - { name: "gui" }
+
+    - name: Configure dnsmasq for DHCP, TFTP, and PXE
+      copy:
+        dest: /etc/dnsmasq.d/pxe.conf
+        content: |
+          interface=eth1
+          dhcp-range=192.168.56.100,192.168.56.200,12h
+          dhcp-boot=pxelinux.0
+          enable-tftp
+          tftp-root={{ tftp_root }}
+          # Set next-server to PXE server IP
+          dhcp-option=66,192.168.56.20
+
+    - name: Restart dnsmasq and httpd
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - dnsmasq
+        - httpd
+
+    - name: Gather final facts for report
+      setup:
+      register: final_facts
+
+    - name: Ensure reports directory exists on host
+      file:
+        path: /vagrant/../reports
+        state: directory
+        mode: '0777'
+
+    - name: Write HTML report with VM facts
+      copy:
+        dest: /vagrant/../reports/vm_report_pxe.html
+        content: |
+          <html>
+          <head><title>PXE VM State Report</title></head>
+          <body>
+          <h1>PXE VM State Report</h1>
+          <h2>All Ansible Facts</h2>
+          <pre>{{ final_facts.ansible_facts | to_nice_json }}</pre>
+          </body>
+          </html>

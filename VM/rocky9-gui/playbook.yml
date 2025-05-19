@@ -1,0 +1,130 @@
+- name: Rocky 9 Full GUI (Minimal Bloat)
+  hosts: all
+  become: true
+  pre_tasks:
+    - name: Install cloud-utils-growpart for disk resizing
+      dnf:
+        name: cloud-utils-growpart
+        state: present
+
+    - name: Install util-linux (for lsblk and findmnt)
+      dnf:
+        name: util-linux
+        state: present
+
+    - name: Get root device
+      command: findmnt -n -o SOURCE /
+      register: root_device_result
+
+    - name: Get disk device for root
+      set_fact:
+        root_disk: "{{ root_device_result.stdout | regex_replace('([0-9]+)$', '') }}"
+
+    - name: Get partition number for root
+      set_fact:
+        root_partnum: "{{ root_device_result.stdout | regex_search('([0-9]+)$') }}"
+
+    - name: Grow root partition
+      command: "growpart {{ root_disk }} {{ root_partnum }}"
+      register: growpart_result
+      changed_when: "'CHANGED' in growpart_result.stdout or growpart_result.rc == 0"
+      failed_when: growpart_result.rc not in [0, 1]
+
+    - name: Get root filesystem type
+      command: findmnt -n -o FSTYPE /
+      register: root_fstype
+
+    - name: Resize root filesystem (XFS)
+      command: xfs_growfs /
+      when: root_fstype.stdout == "xfs"
+
+    - name: Resize root filesystem (ext4)
+      command: resize2fs {{ root_device_result.stdout }}
+      when: root_fstype.stdout == "ext4"
+
+  tasks:
+    - name: Ensure dnf plugins and update cache
+      dnf:
+        name:
+          - dnf-plugins-core
+        state: present
+
+    - name: Refresh DNF metadata
+      command: dnf makecache
+      changed_when: false
+
+    - name: List available groups (for debug)
+      command: dnf group list
+      register: group_list
+      changed_when: false
+
+    - name: Try installing 'Server with GUI' group
+      dnf:
+        name: "@Server with GUI"
+        state: present
+      register: gui_group_result
+      ignore_errors: true
+
+    - name: Try installing 'workstation' group if 'Server with GUI' failed
+      dnf:
+        name: "@workstation"
+        state: present
+      when: gui_group_result is failed
+
+    - name: Remove extra bloatware groups
+      dnf:
+        name:
+          - "@multimedia"
+          - "@office-suite"
+          - "@graphical-admin-tools"
+          - "@guest-agents"
+        state: absent
+        skip_broken: true
+
+    - name: Remove old Python versions
+      dnf:
+        name:
+          - python2
+          - python36
+          - python38
+        state: absent
+        skip_broken: true
+
+    - name: Install latest Python 3 and pip
+      dnf:
+        name:
+          - python3
+          - python3-pip
+        state: latest
+
+    - name: Set graphical target as default
+      systemd:
+        name: graphical.target
+        enabled: true
+
+    - name: Ensure graphical target is active
+      command: systemctl isolate graphical.target
+      changed_when: false
+
+    - name: Gather final facts for report
+      setup:
+      register: final_facts
+
+    - name: Ensure reports directory exists on host
+      file:
+        path: /vagrant/../reports
+        state: directory
+        mode: '0777'
+
+    - name: Write HTML report with VM facts
+      copy:
+        dest: /vagrant/../reports/vm_report_gui.html
+        content: |
+          <html>
+          <head><title>GUI VM State Report</title></head>
+          <body>
+          <h1>GUI VM State Report</h1>
+          <h2>All Ansible Facts</h2>
+          <pre>{{ final_facts.ansible_facts | to_nice_json }}</pre>
+          </body>
+          </html>

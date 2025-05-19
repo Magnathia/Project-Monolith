@@ -1,0 +1,61 @@
+- name: Rocky 9 CLI Only (Bare Bones)
+  hosts: all
+  become: true
+  vars:
+    cache_dir: "{{ cache_dir | default('/vagrant/cache') }}"
+  tasks:
+    - name: Ensure minimal system (remove unwanted packages)
+      dnf:
+        name: "@core"
+        state: present
+
+    - name: Remove GUI and extra packages (skip if group not present)
+      dnf:
+        name:
+          - "@workstation"
+          - "@server-with-gui"
+          - "@graphical-admin-tools"
+          - "@multimedia"
+          - "@office-suite"
+        state: absent
+        skip_broken: yes
+      ignore_errors: true
+
+    - name: Remove old Python versions
+      dnf:
+        name:
+          - python2
+          - python36
+          - python38
+        state: absent
+        skip_broken: yes
+
+    - name: Install latest Python 3 and pip
+      dnf:
+        name:
+          - python3
+          - python3-pip
+        state: latest
+
+    - name: Gather final facts for report
+      setup:
+      register: final_facts
+
+    - name: Ensure reports directory exists on host
+      file:
+        path: /vagrant/../reports
+        state: directory
+        mode: '0777'
+
+    - name: Write HTML report with VM facts
+      copy:
+        dest: /vagrant/../reports/vm_report_cli.html
+        content: |
+          <html>
+          <head><title>CLI VM State Report</title></head>
+          <body>
+          <h1>CLI VM State Report</h1>
+          <h2>All Ansible Facts</h2>
+          <pre>{{ final_facts.ansible_facts | to_nice_json }}</pre>
+          </body>
+          </html>

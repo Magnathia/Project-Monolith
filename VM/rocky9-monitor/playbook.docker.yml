@@ -1,0 +1,108 @@
+- name: Ensure cache directory exists
+  file:
+    path: "{{ cache_dir | default('/vagrant/cache') }}"
+    state: directory
+    mode: '0755'
+
+- name: Check for cached Docker CE repo
+  stat:
+    path: "{{ cache_dir | default('/vagrant/cache') }}/docker-ce.repo"
+  register: docker_ce_repo_in_cache
+
+- name: Copy Docker CE repo from cache if present
+  copy:
+    src: "{{ cache_dir | default('/vagrant/cache') }}/docker-ce.repo"
+    dest: /etc/yum.repos.d/docker-ce.repo
+    remote_src: yes
+  when: docker_ce_repo_in_cache.stat.exists
+
+- name: Download Docker CE repo if not in cache
+  get_url:
+    url: https://download.docker.com/linux/centos/docker-ce.repo
+    dest: /etc/yum.repos.d/docker-ce.repo
+  when: not docker_ce_repo_in_cache.stat.exists
+  register: docker_ce_repo_downloaded
+
+- name: Copy downloaded Docker CE repo to cache
+  copy:
+    src: /etc/yum.repos.d/docker-ce.repo
+    dest: "{{ cache_dir | default('/vagrant/cache') }}/docker-ce.repo"
+    remote_src: yes
+  when: docker_ce_repo_downloaded is defined and docker_ce_repo_downloaded.changed
+
+- name: Check for cached EPEL RPM
+  stat:
+    path: "{{ cache_dir | default('/vagrant/cache') }}/epel-release-latest-9.noarch.rpm"
+  register: epel_rpm_in_cache
+
+- name: Install EPEL from cached RPM if present
+  dnf:
+    name: "{{ cache_dir | default('/vagrant/cache') }}/epel-release-latest-9.noarch.rpm"
+    state: present
+  when: epel_rpm_in_cache.stat.exists
+
+- name: Download EPEL RPM if not in cache
+  get_url:
+    url: https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+    dest: /tmp/epel-release-latest-9.noarch.rpm
+    mode: '0644'
+  when: not epel_rpm_in_cache.stat.exists
+  register: epel_rpm_downloaded
+
+- name: Install EPEL from downloaded RPM
+  dnf:
+    name: /tmp/epel-release-latest-9.noarch.rpm
+    state: present
+  when: epel_rpm_downloaded is defined and epel_rpm_downloaded.changed
+
+- name: Copy downloaded EPEL RPM to cache
+  copy:
+    src: /tmp/epel-release-latest-9.noarch.rpm
+    dest: "{{ cache_dir | default('/vagrant/cache') }}/epel-release-latest-9.noarch.rpm"
+    remote_src: yes
+  when: epel_rpm_downloaded is defined and epel_rpm_downloaded.changed
+
+- name: Install required packages
+  dnf:
+    name:
+      - yum-utils
+      - device-mapper-persistent-data
+      - lvm2
+      - git
+      - python3
+      - python3-pip
+      - python3-requests
+    state: present
+
+- name: Ensure pip is upgraded
+  pip:
+    name: pip
+    state: latest
+    executable: pip3
+
+- name: Ensure requests is installed for Python 3
+  pip:
+    name: requests
+    state: present
+    executable: pip3
+
+- name: Install Docker CE
+  dnf:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+    state: latest
+
+- name: Enable and start Docker
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Add users to docker group
+  user:
+    name: "{{ item }}"
+    groups: docker
+    append: yes
+  loop: "{{ docker_users }}"

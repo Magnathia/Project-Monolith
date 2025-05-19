@@ -1,0 +1,14 @@
+- name: Run Zabbix appliance container
+  community.docker.docker_container:
+    name: zabbix-server
+    image: zabbix/zabbix-appliance:alpine-6.4-latest
+    state: started
+    restart_policy: always
+    ports:
+      - "8080:8080"
+    env:
+      DB_SERVER_HOST: localhost
+      MYSQL_USER: zabbix
+      MYSQL_PASSWORD: zabbix
+      MYSQL_ROOT_PASSWORD: zabbixroot
+      ZBX_SERVER_NAME: Rocky9-Monitor

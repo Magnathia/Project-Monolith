@@ -1,0 +1,10 @@
+- name: Run ntopng container
+  community.docker.docker_container:
+    name: ntopng
+    image: ntop/ntopng:latest
+    state: started
+    restart_policy: always
+    network_mode: host
+    env:
+      TZ: UTC
+      NTOPNG_ADMIN_PASSWORD: admin

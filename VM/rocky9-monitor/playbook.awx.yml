@@ -1,0 +1,16 @@
+- name: Run AWX container
+  community.docker.docker_container:
+    name: awx
+    image: ansible/awx:21.14.0
+    state: started
+    restart_policy: always
+    ports:
+      - "8081:8052"
+    env:
+      SECRET_KEY: awxsecret
+      DATABASE_USER: awx
+      DATABASE_NAME: awx
+      DATABASE_PASSWORD: awxpass
+      DATABASE_HOST: 127.0.0.1
+      AWX_ADMIN_USER: admin
+      AWX_ADMIN_PASSWORD: password

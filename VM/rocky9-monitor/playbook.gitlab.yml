@@ -1,0 +1,14 @@
+- name: Run GitLab CE container
+  community.docker.docker_container:
+    name: gitlab
+    image: gitlab/gitlab-ce:latest
+    state: started
+    restart_policy: always
+    ports:
+      - "8929:8929"
+      - "2289:22"
+    env:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8929'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2289
+      GITLAB_ROOT_PASSWORD: gitlabroot

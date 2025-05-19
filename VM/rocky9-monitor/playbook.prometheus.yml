@@ -1,0 +1,12 @@
+- name: Run Prometheus container
+  community.docker.docker_container:
+    name: prometheus
+    image: prom/prometheus
+    state: started
+    restart_policy: always
+    ports:
+      - "9090:9090"
+    env:
+      TZ: UTC
+    volumes:
+      - /opt/prometheus:/etc/prometheus

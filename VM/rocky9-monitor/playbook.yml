@@ -1,0 +1,58 @@
+- name: Rocky 9 Monitoring/Management Stack (Dockerized)
+  hosts: all
+  become: true
+  vars:
+    docker_users:
+      - vagrant
+  tasks:
+    - name: Install required packages and Docker
+      import_tasks: playbook.docker.yml
+
+    - name: Deploy Prometheus
+      import_tasks: playbook.prometheus.yml
+
+    - name: Deploy Grafana
+      import_tasks: playbook.grafana.yml
+
+    - name: Deploy ntopng
+      import_tasks: playbook.ntopng.yml
+
+    - name: Deploy Zabbix
+      import_tasks: playbook.zabbix.yml
+
+    - name: Deploy Ansible AWX
+      import_tasks: playbook.awx.yml
+
+    - name: Deploy GitLab CE
+      import_tasks: playbook.gitlab.yml
+
+    - name: Run Zabbix appliance container
+      community.docker.docker_container:
+        name: zabbix
+        image: zabbix/zabbix-appliance:alpine-4.0-latest
+        state: started
+        restart_policy: always
+        network_mode: host
+
+    - name: Gather final facts for report
+      setup:
+      register: final_facts
+
+    - name: Ensure reports directory exists on host
+      file:
+        path: /vagrant/../reports
+        state: directory
+        mode: '0777'
+
+    - name: Write HTML report with VM facts
+      copy:
+        dest: /vagrant/../reports/vm_report_monitor.html
+        content: |
+          <html>
+          <head><title>Monitor VM State Report</title></head>
+          <body>
+          <h1>Monitor VM State Report</h1>
+          <h2>All Ansible Facts</h2>
+          <pre>{{ final_facts.ansible_facts | to_nice_json }}</pre>
+          </body>
+          </html>
